@@ -1,60 +1,51 @@
-#Template from: https://github.com/ThreeDeeJay/GitHub-Actions-build-templates/blob/main/Android-Gradle
-name: Build
-
-env:
-  Artifacts: app/build/outputs/apk/debug/app-debug.apk
-  Branch: ${{github.ref_name}}
-  GH_TOKEN: ${{ github.token }}
+name: Build debug apk
 
 on:
   push:
-    Branches: $Branch
-  pull_request:
-    Branches: $Branch
   workflow_dispatch:
 
 jobs:
-  build:
-
+  pre_build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Clone repo and submodules
-      run: git clone --recurse-submodules https://github.com/${{github.repository}}.git . #--branch ${{env.Branch}}
+      - uses: actions/checkout@v2
+      - name: set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          java-version: '11.0.14+101'
+          distribution: 'temurin'
+          cache: gradle
 
-    - name: Get current date, commit hash and count
-      run: |
-        echo "CommitDate=$(git show -s --date=format:'%Y-%m-%d' --format=%cd)" >> $env:GITHUB_ENV
-        echo "CommitHashShort=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_ENV
-        echo "CommitCount=$(git rev-list --count ${{env.Branch}})" >> $env:GITHUB_ENV
+      - name: Grant execute permissions for gradlew
+        run: chmod +x gradlew
+      - name: Build with Gradle
+        run: ./gradlew build
 
-    - name: set up JDK 11
-      uses: actions/setup-java@v2
-      with:
-        java-version: '11.0.14+101'
-        distribution: 'temurin'
-        cache: gradle
+  build_apk:
+    needs: [pre_build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v2
+        
+      - name: Grant execute permissions for gradlew
+        run: chmod +x gradlew
+        
+      - name: Build unsigned debug apk
+        run: ./gradlew assembleDebug
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+      - name: Upload debug apk
+        uses: actions/upload-artifact@v3
+        with:
+          name: apk-debug
+          path: app/build/outputs/apk/debug
 
-    - name: Build unsigned debug apk
-      run: ./gradlew assembleDebug
-
-    - name: Build with Gradle
-      run: ./gradlew build --warning-mode all
-
-    - name: List files
-      run: ls -R
-
-    - name: Upload Artifact to GitHub
-      uses: actions/upload-artifact@v2
-      with:
-        name: "${{github.event.repository.name}}_r${{env.CommitCount}}@${{env.CommitHashShort}}"
-        path: "${{github.workspace}}/${{env.Artifacts}}/"
-
-    - name: Release
-      run: |
-        gh release create r${{env.CommitCount}} --generate-notes --latest=false --prerelease --title "[${{env.CommitDate}}] ${{github.event.repository.name}} r${{env.CommitCount}}@${{env.CommitHashShort}}"
-        gh release upload r${{env.CommitCount}} "${{env.Artifacts}}"
-        gh release upload latest                "${{env.Artifacts}}" --clobber
+      - name: GitHub pre-release
+        uses: "Sweeistaken/sweelease@v1.1"
+        with:
+          repo_token: "${{secrets.GITHUB_TOKEN}}"
+          automatic_release_tag: "latest"
+          prerelease: false
+          title: "DarQ"
+          files: "app/build/outputs/apk/debug/*"
